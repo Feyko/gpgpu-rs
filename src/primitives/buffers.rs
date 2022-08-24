@@ -1,7 +1,8 @@
 use std::marker::PhantomData;
 
 use thiserror::Error;
-use wgpu::util::DeviceExt;
+use wgpu::BufferAsyncError;
+use wgpu::util::{DeviceExt, DownloadBuffer};
 
 use crate::{GpuBuffer, GpuUniformBuffer};
 
@@ -99,12 +100,13 @@ where
             output_size
         };
 
-        let download = wgpu::util::DownloadBuffer::read_buffer(
-            &self.fw.device,
-            &self.fw.queue,
-            &self.buf.slice(..download_size as u64),
-        )
-        .await?;
+        let (sender, receiver) = futures::channel::oneshot::channel::<Result<DownloadBuffer, BufferAsyncError>>();
+
+        DownloadBuffer::read_buffer(&self.fw.device, &self.fw.queue, &self.buf.slice(..download_size as u64), |arg| {
+            sender.send(arg).ok();
+        });
+
+        let download = receiver.await.unwrap().unwrap();
 
         buf.copy_from_slice(bytemuck::cast_slice(&download));
 

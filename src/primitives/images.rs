@@ -1,7 +1,8 @@
 use std::marker::PhantomData;
 
 use thiserror::Error;
-use wgpu::util::DeviceExt;
+use wgpu::BufferAsyncError;
+use wgpu::util::{DeviceExt, DownloadBuffer};
 
 use crate::{GpuConstImage, GpuImage};
 
@@ -210,13 +211,14 @@ where
 
         self.fw.queue.submit(Some(encoder.finish()));
 
-        let download = wgpu::util::DownloadBuffer::read_buffer(
-            &self.fw.device,
-            &self.fw.queue,
-            &staging.slice(..),
-        )
-        .await
-        .unwrap();
+
+        let (sender, receiver) = futures::channel::oneshot::channel::<Result<DownloadBuffer, BufferAsyncError>>();
+
+
+         DownloadBuffer::read_buffer(&self.fw.device, &self.fw.queue, &staging.slice(..), |arg| {
+            sender.send(arg).ok();
+        });
+        let download = receiver.await.unwrap().unwrap();
 
         let bytes_read: usize = download
             .chunks(padded_bytes_per_row as usize)
